@@ -1,0 +1,236 @@
+{
+  "categories": [
+    {
+      "id": "1",
+      "name": "Apparel"
+    },
+    {
+      "id": "2",
+      "name": "Footwear"
+    },
+    {
+      "id": "3",
+      "name": "Electronics"
+    },
+    {
+      "id": "4",
+      "name": "Home & Kitchen"
+    },
+    {
+      "id": "37",
+      "name": "CHILDREN"
+    }
+  ],
+  "products": [
+    {
+      "id": "11",
+      "sku": "APL-TSH-001",
+      "name": "Classic Cotton T-Shirt",
+      "price": 499,
+      "categoryId": "1"
+    },
+    {
+      "id": "12",
+      "sku": "APL-JKT-002",
+      "name": "Windbreaker Jacket",
+      "price": 1799,
+      "categoryId": "1"
+    },
+    {
+      "id": "13",
+      "sku": "FTW-SNK-001",
+      "name": "Running Sneakers",
+      "price": 2499,
+      "categoryId": "2"
+    },
+    {
+      "id": "14",
+      "sku": "ELC-EBD-001",
+      "name": "Wireless Earbuds",
+      "price": 1999,
+      "categoryId": "3"
+    },
+    {
+      "id": "15",
+      "sku": "HMK-MUG-001",
+      "name": "Ceramic Coffee Mug",
+      "price": 299,
+      "categoryId": "4"
+    },
+    {
+      "id": "36",
+      "sku": "ABC-TYY-001",
+      "name": "DELL LAPTOP",
+      "price": 132456,
+      "categoryId": "3"
+    }
+  ],
+  "warehouses": [
+    {
+      "id": "5",
+      "name": "North Distribution Center",
+      "location": "Delhi, IN"
+    },
+    {
+      "id": "6",
+      "name": "South Fulfillment Hub",
+      "location": "Bengaluru, IN"
+    },
+    {
+      "id": "7",
+      "name": "West Regional Store",
+      "location": "Mumbai, IN"
+    }
+  ],
+  "inventory": [
+    {
+      "id": "16",
+      "productId": "11",
+      "warehouseId": "5",
+      "quantity": 20
+    },
+    {
+      "id": "17",
+      "productId": "11",
+      "warehouseId": "6",
+      "quantity": 57
+    },
+    {
+      "id": "18",
+      "productId": "11",
+      "warehouseId": "7",
+      "quantity": 26
+    },
+    {
+      "id": "19",
+      "productId": "12",
+      "warehouseId": "5",
+      "quantity": 25
+    },
+    {
+      "id": "20",
+      "productId": "12",
+      "warehouseId": "6",
+      "quantity": 28
+    },
+    {
+      "id": "21",
+      "productId": "12",
+      "warehouseId": "7",
+      "quantity": 31
+    },
+    {
+      "id": "22",
+      "productId": "13",
+      "warehouseId": "5",
+      "quantity": 30
+    },
+    {
+      "id": "23",
+      "productId": "13",
+      "warehouseId": "6",
+      "quantity": 33
+    },
+    {
+      "id": "24",
+      "productId": "13",
+      "warehouseId": "7",
+      "quantity": 36
+    },
+    {
+      "id": "25",
+      "productId": "14",
+      "warehouseId": "5",
+      "quantity": 35
+    },
+    {
+      "id": "26",
+      "productId": "14",
+      "warehouseId": "6",
+      "quantity": 38
+    },
+    {
+      "id": "27",
+      "productId": "14",
+      "warehouseId": "7",
+      "quantity": 41
+    },
+    {
+      "id": "28",
+      "productId": "15",
+      "warehouseId": "5",
+      "quantity": 40
+    },
+    {
+      "id": "29",
+      "productId": "15",
+      "warehouseId": "6",
+      "quantity": 43
+    },
+    {
+      "id": "30",
+      "productId": "15",
+      "warehouseId": "7",
+      "quantity": 46
+    }
+  ],
+  "orders": [
+    {
+      "id": "31",
+      "customerName": "Asha Verma",
+      "warehouseId": "5",
+      "status": "Confirmed",
+      "date": "2026-10-01"
+    }
+  ],
+  "orderItems": [
+    {
+      "id": "32",
+      "orderId": "31",
+      "productId": "11",
+      "quantity": 2
+    },
+    {
+      "id": "33",
+      "orderId": "31",
+      "productId": "14",
+      "quantity": 1
+    }
+  ],
+  "suppliers": [
+    {
+      "id": "8",
+      "name": "Apex Textiles Ltd.",
+      "contact": "sales@apextextiles.example"
+    },
+    {
+      "id": "9",
+      "name": "StrideWell Footwear Co.",
+      "contact": "orders@stridewell.example"
+    },
+    {
+      "id": "10",
+      "name": "CircuitPoint Electronics",
+      "contact": "procurement@circuitpoint.example"
+    }
+  ],
+  "purchaseOrders": [
+    {
+      "id": "34",
+      "supplierId": "8",
+      "status": "Sent",
+      "date": "2026-10-01"
+    }
+  ],
+  "poItems": [
+    {
+      "id": "35",
+      "poId": "34",
+      "productId": "12",
+      "quantity": 50
+    }
+  ],
+  "_meta": {
+    "nextId": 38
+  }
+}
