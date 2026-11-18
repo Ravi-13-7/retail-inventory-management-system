@@ -2,3 +2,7 @@ node_modules/
 data/db.json
 dist/
 .env
+
+# Database backups
+backend/data/db-backup.json
+db-lowdb-backup.js

@@ -1,33 +1,97 @@
+
 const express = require("express");
-const { db, nextId } = require("../db");
+const { getDB, nextId } = require("../db");
+
 const router = express.Router();
 
-// GET /api/categories — list all
-router.get("/", (req, res) => {
-  res.json(db.get("categories").value());
+// GET /api/categories - list all
+router.get("/", async (req, res) => {
+  try {
+    const db = getDB();
+    const categories = await db.collection("categories").find().toArray();
+
+    res.json(categories);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch categories" });
+  }
 });
 
-// POST /api/categories — create
-router.post("/", (req, res) => {
-  const { name } = req.body;
-  if (!name) return res.status(400).json({ error: "name is required" });
-  const category = { id: nextId(), name };
-  db.get("categories").push(category).write();
-  res.status(201).json(category);
+// POST /api/categories - create
+router.post("/", async (req, res) => {
+  try {
+    const { name } = req.body;
+
+    if (typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({ error: "name is required" });
+    }
+
+    const db = getDB();
+
+    const category = {
+      id: await nextId(),
+      name: name.trim()
+    };
+
+    await db.collection("categories").insertOne(category);
+
+    res.status(201).json(category);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to create category" });
+  }
 });
 
-// PUT /api/categories/:id — update
-router.put("/:id", (req, res) => {
-  const category = db.get("categories").find({ id: req.params.id });
-  if (!category.value()) return res.status(404).json({ error: "Category not found" });
-  category.assign(req.body).write();
-  res.json(category.value());
+// PUT /api/categories/:id - update
+router.put("/:id", async (req, res) => {
+  try {
+    const { name } = req.body;
+
+    if (typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({ error: "Valid name is required" });
+    }
+
+    const db = getDB();
+    const collection = db.collection("categories");
+
+    const result = await collection.updateOne(
+      { id: req.params.id },
+      { $set: { name: name.trim() } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+
+    const updatedCategory = await collection.findOne({
+      id: req.params.id
+    });
+
+    res.json(updatedCategory);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to update category" });
+  }
 });
 
 // DELETE /api/categories/:id
-router.delete("/:id", (req, res) => {
-  db.get("categories").remove({ id: req.params.id }).write();
-  res.status(204).end();
+router.delete("/:id", async (req, res) => {
+  try {
+    const db = getDB();
+
+    const result = await db.collection("categories").deleteOne({
+      id: req.params.id
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+
+    res.status(204).end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to delete category" });
+  }
 });
 
 module.exports = router;

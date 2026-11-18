@@ -1,92 +1,266 @@
+
 const express = require("express");
-const { db, nextId } = require("../db");
+const { getDB, getClient, nextId } = require("../db");
+
 const router = express.Router();
 
 const STATUS_FLOW = ["Confirmed", "Picked", "Packed", "Shipped"];
 
-function enrichOrder(order) {
-  const items = db.get("orderItems").filter({ orderId: order.id }).value().map((it) => {
-    const product = db.get("products").find({ id: it.productId }).value();
-    return { ...it, productName: product ? product.name : null, sku: product ? product.sku : null };
+// Helper: add items and warehouse details to an order
+async function enrichOrder(order, db) {
+  const items = await db.collection("orderItems")
+    .find({ orderId: order.id })
+    .toArray();
+
+  const enrichedItems = await Promise.all(
+    items.map(async (item) => {
+      const product = await db.collection("products").findOne({
+        id: item.productId
+      });
+
+      return {
+        ...item,
+        productName: product ? product.name : null,
+        sku: product ? product.sku : null
+      };
+    })
+  );
+
+  const warehouse = await db.collection("warehouses").findOne({
+    id: order.warehouseId
   });
-  const warehouse = db.get("warehouses").find({ id: order.warehouseId }).value();
-  return { ...order, items, warehouseName: warehouse ? warehouse.name : null };
+
+  return {
+    ...order,
+    items: enrichedItems,
+    warehouseName: warehouse ? warehouse.name : null
+  };
 }
 
-// GET /api/orders — list all orders with their line items
-router.get("/", (req, res) => {
-  res.json(db.get("orders").value().map(enrichOrder));
-});
+// GET /api/orders - list all orders
+router.get("/", async (req, res) => {
+  try {
+    const db = getDB();
 
-router.get("/:id", (req, res) => {
-  const order = db.get("orders").find({ id: req.params.id }).value();
-  if (!order) return res.status(404).json({ error: "Order not found" });
-  res.json(enrichOrder(order));
-});
+    const orders = await db.collection("orders")
+      .find()
+      .toArray();
 
-// POST /api/orders — create an order + items. Stock is only checked, not yet deducted
-// (deduction happens on shipment, matching the order fulfillment flow diagram).
-router.post("/", (req, res) => {
-  const { customerName, warehouseId, items } = req.body;
-  if (!customerName || !warehouseId || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: "customerName, warehouseId and at least one item are required" });
+    const result = await Promise.all(
+      orders.map((order) => enrichOrder(order, db))
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch orders" });
   }
-
-  const order = {
-    id: nextId(),
-    customerName,
-    warehouseId,
-    status: "Confirmed",
-    date: new Date().toISOString().slice(0, 10)
-  };
-  db.get("orders").push(order).write();
-
-  items.forEach((it) => {
-    db.get("orderItems").push({
-      id: nextId(),
-      orderId: order.id,
-      productId: it.productId,
-      quantity: Number(it.quantity) || 1
-    }).write();
-  });
-
-  res.status(201).json(enrichOrder(order));
 });
 
-// POST /api/orders/:id/advance — move the order to the next status in the flow.
-// When moving into "Shipped", stock is deducted from the order's warehouse.
-// If stock is short, the order is NOT advanced and a 409 is returned
-// (mirrors the "Stock available?" decision in the flow diagram).
-router.post("/:id/advance", (req, res) => {
-  const orderWrap = db.get("orders").find({ id: req.params.id });
-  const order = orderWrap.value();
-  if (!order) return res.status(404).json({ error: "Order not found" });
+// GET /api/orders/:id - get one order
+router.get("/:id", async (req, res) => {
+  try {
+    const db = getDB();
 
-  const currentIndex = STATUS_FLOW.indexOf(order.status);
-  if (currentIndex === -1 || currentIndex === STATUS_FLOW.length - 1) {
-    return res.status(400).json({ error: `Order is already at its final status (${order.status})` });
-  }
-  const nextStatus = STATUS_FLOW[currentIndex + 1];
+    const order = await db.collection("orders").findOne({
+      id: req.params.id
+    });
 
-  if (nextStatus === "Shipped") {
-    const items = db.get("orderItems").filter({ orderId: order.id }).value();
-    for (const it of items) {
-      const stock = db.get("inventory").find({ productId: it.productId, warehouseId: order.warehouseId }).value();
-      if (!stock || stock.quantity < it.quantity) {
-        return res.status(409).json({
-          error: "Insufficient stock to ship this order. Transfer stock in or raise a purchase order first.",
-          productId: it.productId
-        });
-      }
+    if (!order) {
+      return res.status(404).json({ error: "Order not found" });
     }
-    items.forEach((it) => {
-      db.get("inventory").find({ productId: it.productId, warehouseId: order.warehouseId })
-        .update("quantity", (q) => q - it.quantity).write();
+
+    res.json(await enrichOrder(order, db));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch order" });
+  }
+});
+
+// POST /api/orders - create order and order items
+router.post("/", async (req, res) => {
+  const { customerName, warehouseId, items } = req.body;
+
+  if (
+    !customerName ||
+    !warehouseId ||
+    !Array.isArray(items) ||
+    items.length === 0
+  ) {
+    return res.status(400).json({
+      error: "customerName, warehouseId and at least one item are required"
     });
   }
 
-  orderWrap.assign({ status: nextStatus }).write();
-  res.json(enrichOrder(orderWrap.value()));
+  const session = getClient().startSession();
+
+  try {
+    const db = getDB();
+
+    const order = {
+      id: await nextId(),
+      customerName,
+      warehouseId,
+      status: "Confirmed",
+      date: new Date().toISOString().slice(0, 10)
+    };
+
+    const orderItems = [];
+
+    for (const item of items) {
+      orderItems.push({
+        id: await nextId(),
+        orderId: order.id,
+        productId: item.productId,
+        quantity: Number(item.quantity) || 1
+      });
+    }
+
+    await session.withTransaction(async () => {
+      await db.collection("orders").insertOne(order, { session });
+
+      await db.collection("orderItems").insertMany(
+        orderItems,
+        { session }
+      );
+    });
+
+    res.status(201).json(await enrichOrder(order, db));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to create order" });
+  } finally {
+    await session.endSession();
+  }
+});
+
+// POST /api/orders/:id/advance - advance order status
+router.post("/:id/advance", async (req, res) => {
+  const session = getClient().startSession();
+
+  try {
+    const db = getDB();
+
+    let updatedOrder = null;
+    let failure = null;
+
+    await session.withTransaction(async () => {
+      const orders = db.collection("orders");
+      const orderItemsCollection = db.collection("orderItems");
+      const inventory = db.collection("inventory");
+
+      const order = await orders.findOne(
+        { id: req.params.id },
+        { session }
+      );
+
+      if (!order) {
+        failure = {
+          status: 404,
+          error: "Order not found"
+        };
+        return;
+      }
+
+      const currentIndex = STATUS_FLOW.indexOf(order.status);
+
+      if (
+        currentIndex === -1 ||
+        currentIndex === STATUS_FLOW.length - 1
+      ) {
+        failure = {
+          status: 400,
+          error: `Order is already at its final status (${order.status})`
+        };
+        return;
+      }
+
+      const nextStatus = STATUS_FLOW[currentIndex + 1];
+
+      if (nextStatus === "Shipped") {
+        const items = await orderItemsCollection
+          .find({ orderId: order.id }, { session })
+          .toArray();
+
+        // Combine quantities if the same product appears more than once
+        const requiredStock = {};
+
+        for (const item of items) {
+          requiredStock[item.productId] =
+            (requiredStock[item.productId] || 0) + item.quantity;
+        }
+
+        // Check stock availability first
+        for (const [productId, quantity] of Object.entries(requiredStock)) {
+          const stock = await inventory.findOne(
+            {
+              productId,
+              warehouseId: order.warehouseId,
+              quantity: { $gte: quantity }
+            },
+            { session }
+          );
+
+          if (!stock) {
+            failure = {
+              status: 409,
+              error: "Insufficient stock to ship this order. Transfer stock in or raise a purchase order first.",
+              productId
+            };
+            return;
+          }
+        }
+
+        // Deduct stock inside the same transaction
+        for (const [productId, quantity] of Object.entries(requiredStock)) {
+          const result = await inventory.updateOne(
+            {
+              productId,
+              warehouseId: order.warehouseId,
+              quantity: { $gte: quantity }
+            },
+            {
+              $inc: { quantity: -quantity }
+            },
+            { session }
+          );
+
+          if (result.matchedCount === 0) {
+            throw new Error("INSUFFICIENT_STOCK");
+          }
+        }
+      }
+
+      await orders.updateOne(
+        { id: order.id },
+        { $set: { status: nextStatus } },
+        { session }
+      );
+
+      updatedOrder = {
+        ...order,
+        status: nextStatus
+      };
+    });
+
+    if (failure) {
+      return res.status(failure.status).json(failure);
+    }
+
+    res.json(await enrichOrder(updatedOrder, db));
+  } catch (error) {
+    console.error(error);
+
+    if (error.message === "INSUFFICIENT_STOCK") {
+      return res.status(409).json({
+        error: "Insufficient stock to ship this order."
+      });
+    }
+
+    res.status(500).json({ error: "Failed to advance order" });
+  } finally {
+    await session.endSession();
+  }
 });
 
 module.exports = router;

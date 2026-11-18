@@ -1,10 +1,19 @@
+
 const express = require("express");
-const { db, nextId } = require("../db");
+const { getDB, nextId } = require("../db");
+
 const router = express.Router();
 
-function enrich(row) {
-  const product = db.get("products").find({ id: row.productId }).value();
-  const warehouse = db.get("warehouses").find({ id: row.warehouseId }).value();
+// Helper: add product and warehouse details
+async function enrich(row, db) {
+  const product = await db.collection("products").findOne({
+    id: row.productId
+  });
+
+  const warehouse = await db.collection("warehouses").findOne({
+    id: row.warehouseId
+  });
+
   return {
     ...row,
     productName: product ? product.name : null,
@@ -13,56 +22,174 @@ function enrich(row) {
   };
 }
 
-// GET /api/inventory — full stock table across all warehouses
-router.get("/", (req, res) => {
-  res.json(db.get("inventory").value().map(enrich));
+// GET /api/inventory - full stock table
+router.get("/", async (req, res) => {
+  try {
+    const db = getDB();
+
+    const rows = await db.collection("inventory").find().toArray();
+
+    const result = await Promise.all(
+      rows.map((row) => enrich(row, db))
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch inventory" });
+  }
 });
 
-// GET /api/inventory/low-stock?threshold=10 — items below a reorder point
-router.get("/low-stock", (req, res) => {
-  const threshold = Number(req.query.threshold) || 10;
-  const rows = db.get("inventory").value().filter((r) => r.quantity <= threshold).map(enrich);
-  res.json(rows);
+// GET /api/inventory/low-stock?threshold=10
+router.get("/low-stock", async (req, res) => {
+  try {
+    const db = getDB();
+    const threshold = Number(req.query.threshold) || 10;
+
+    const rows = await db.collection("inventory")
+      .find({ quantity: { $lte: threshold } })
+      .toArray();
+
+    const result = await Promise.all(
+      rows.map((row) => enrich(row, db))
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch low-stock items" });
+  }
 });
 
-// POST /api/inventory — create or top-up a stock row for a product/warehouse pair
-router.post("/", (req, res) => {
-  const { productId, warehouseId, quantity } = req.body;
-  if (!productId || !warehouseId) {
-    return res.status(400).json({ error: "productId and warehouseId are required" });
+// POST /api/inventory - create or top-up stock
+router.post("/", async (req, res) => {
+  try {
+    const { productId, warehouseId, quantity } = req.body;
+    const qty = Number(quantity) || 0;
+
+    if (!productId || !warehouseId) {
+      return res.status(400).json({
+        error: "productId and warehouseId are required"
+      });
+    }
+
+    if (!Number.isFinite(qty) || qty < 0) {
+      return res.status(400).json({
+        error: "Quantity must be a non-negative number"
+      });
+    }
+
+    const db = getDB();
+    const collection = db.collection("inventory");
+
+    let row = await collection.findOne({
+      productId,
+      warehouseId
+    });
+
+    if (row) {
+      await collection.updateOne(
+        { id: row.id },
+        { $inc: { quantity: qty } }
+      );
+
+      row = await collection.findOne({ id: row.id });
+    } else {
+      row = {
+        id: await nextId(),
+        productId,
+        warehouseId,
+        quantity: qty
+      };
+
+      await collection.insertOne(row);
+    }
+
+    res.status(201).json(await enrich(row, db));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to update inventory" });
   }
-  let row = db.get("inventory").find({ productId, warehouseId }).value();
-  if (row) {
-    db.get("inventory").find({ productId, warehouseId }).update("quantity", (q) => q + Number(quantity || 0)).write();
-    row = db.get("inventory").find({ productId, warehouseId }).value();
-  } else {
-    row = { id: nextId(), productId, warehouseId, quantity: Number(quantity) || 0 };
-    db.get("inventory").push(row).write();
-  }
-  res.status(201).json(enrich(row));
 });
 
-// POST /api/inventory/transfer — move stock from one warehouse to another
-router.post("/transfer", (req, res) => {
-  const { productId, fromWarehouseId, toWarehouseId, quantity } = req.body;
-  const qty = Number(quantity);
-  if (!productId || !fromWarehouseId || !toWarehouseId || !qty || qty <= 0) {
-    return res.status(400).json({ error: "productId, fromWarehouseId, toWarehouseId and a positive quantity are required" });
-  }
-  const source = db.get("inventory").find({ productId, warehouseId: fromWarehouseId }).value();
-  if (!source || source.quantity < qty) {
-    return res.status(400).json({ error: "Not enough stock at the source warehouse" });
-  }
-  db.get("inventory").find({ productId, warehouseId: fromWarehouseId }).update("quantity", (q) => q - qty).write();
+// POST /api/inventory/transfer
+router.post("/transfer", async (req, res) => {
+  try {
+    const {
+      productId,
+      fromWarehouseId,
+      toWarehouseId,
+      quantity
+    } = req.body;
 
-  let dest = db.get("inventory").find({ productId, warehouseId: toWarehouseId }).value();
-  if (dest) {
-    db.get("inventory").find({ productId, warehouseId: toWarehouseId }).update("quantity", (q) => q + qty).write();
-  } else {
-    dest = { id: nextId(), productId, warehouseId: toWarehouseId, quantity: qty };
-    db.get("inventory").push(dest).write();
+    const qty = Number(quantity);
+
+    if (
+      !productId ||
+      !fromWarehouseId ||
+      !toWarehouseId ||
+      !Number.isFinite(qty) ||
+      qty <= 0 ||
+      fromWarehouseId === toWarehouseId
+    ) {
+      return res.status(400).json({
+        error: "Valid product, different warehouses and positive quantity are required"
+      });
+    }
+
+    const db = getDB();
+    const collection = db.collection("inventory");
+
+    const source = await collection.findOneAndUpdate(
+      {
+        productId,
+        warehouseId: fromWarehouseId,
+        quantity: { $gte: qty }
+      },
+      {
+        $inc: { quantity: -qty }
+      },
+      {
+        returnDocument: "after"
+      }
+    );
+
+    if (!source) {
+      return res.status(400).json({
+        error: "Not enough stock at the source warehouse"
+      });
+    }
+
+    const dest = await collection.findOne({
+      productId,
+      warehouseId: toWarehouseId
+    });
+
+    if (dest) {
+      await collection.updateOne(
+        { id: dest.id },
+        { $inc: { quantity: qty } }
+      );
+    } else {
+      await collection.insertOne({
+        id: await nextId(),
+        productId,
+        warehouseId: toWarehouseId,
+        quantity: qty
+      });
+    }
+
+    res.json({
+      message: "Transfer complete",
+      productId,
+      fromWarehouseId,
+      toWarehouseId,
+      quantity: qty
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to transfer inventory" });
   }
-  res.json({ message: "Transfer complete", productId, fromWarehouseId, toWarehouseId, quantity: qty });
 });
 
 module.exports = router;

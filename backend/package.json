@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^18.0.10",
     "express": "^4.19.2",
     "lowdb": "^1.0.0",
+    "mongodb": "^7.9.0",
     "morgan": "^1.10.0",
     "uuid": "^9.0.1"
   }
